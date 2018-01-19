@@ -574,3 +574,85 @@ def edgelist_to_adjacency(edgelist):
         else:
             adjacency[v] = {u}
     return adjacency
+
+
+def reduce_degree(J,chain_strength = -2):
+    from copy import deepcopy
+    import numpy as np
+
+    """
+    (shift, J) = reduce_degree(J)
+
+    Reduce the degree of a set of objectives specified by terms to have maximum two
+    degrees via the introduction of ancillary variables.
+
+    Args:
+        J: (dict) quadratic and higher order terms. e.g.: {(1,2):0.5, (1,2,3,4):0.2, ():0.8}
+        chain_strength: the reducer will chain up the terms that are supposed to yield the ancilla
+
+    Returns:
+        shift: the constant energy shift, that is introduced due to chaining
+        J: (dict) new quadratic terms
+
+    Raises:
+        ValueError
+    """
+    terms,values = zip(*J.items())
+    values = np.real(values)
+    if not all(np.imag(J.values())==0): raise ValueError('cannot handle complex J values')
+    terms = map(list,terms)
+    pair_belongs_to = dict()
+    max_var = 0
+    for i in range(len(terms)):
+        for ii in range(len(terms[i])):
+            if terms[i][ii] > max_var:
+                max_var = terms[i][ii]
+        if len(terms[i]) > 2:
+            for j in range(len(terms[i])):
+                for k in range(j + 1, len(terms[i])):
+                    tmp_1 = min(terms[i][j], terms[i][k])
+                    tmp_2 = max(terms[i][j], terms[i][k])
+                    if (tmp_1, tmp_2) not in pair_belongs_to:
+                        pair_belongs_to[(tmp_1, tmp_2)] = set()
+                    pair_belongs_to[(tmp_1, tmp_2)].add(i)
+
+    mapping = []
+    while len(pair_belongs_to) != 0:
+        max_v_len = 0
+        max_k = ()
+        for k, v in pair_belongs_to.iteritems():
+            if len(v) > max_v_len:
+                max_v_len = len(v)
+                max_k = k
+
+        max_var += 1
+        mapping.append([max_var, max_k[0], max_k[1]])
+        affected = deepcopy(pair_belongs_to[max_k])
+        for k in affected:
+            for j in range(len(terms[k])):
+                for t in range(j + 1, len(terms[k])):
+                    tmp_1 = min(terms[k][j], terms[k][t])
+                    tmp_2 = max(terms[k][j], terms[k][t])
+                    pair_belongs_to[(tmp_1, tmp_2)].remove(k)
+                    if len(pair_belongs_to[(tmp_1, tmp_2)]) == 0:
+                        del pair_belongs_to[(tmp_1, tmp_2)]
+            terms[k].remove(max_k[0])
+            terms[k].remove(max_k[1])
+            terms[k].append(max_var)
+
+            if len(terms[k]) > 2:
+                for j in range(len(terms[k])):
+                    for t in range(j + 1, len(terms[k])):
+                        tmp_1 = min(terms[k][j], terms[k][t])
+                        tmp_2 = max(terms[k][j], terms[k][t])
+                        if (tmp_1, tmp_2) not in pair_belongs_to:
+                            pair_belongs_to[(tmp_1, tmp_2)] = set()
+                        pair_belongs_to[(tmp_1, tmp_2)].add(k)
+    terms = map(tuple,terms)
+    J = dict(zip(terms,values))
+    if () not in J: J[()] = 0.0
+    for q,i,j in mapping:
+        J[(i,j)] = chain_strength
+        J[()] -= chain_strength
+    const = J.pop(())
+    return const,J
