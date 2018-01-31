@@ -78,6 +78,8 @@ import itertools
 import random
 from collections import Counter
 import sys
+from copy import deepcopy
+import numpy as np
 
 _PY2 = sys.version_info[0] == 2
 if _PY2:
@@ -575,31 +577,49 @@ def edgelist_to_adjacency(edgelist):
             adjacency[v] = {u}
     return adjacency
 
-
-def reduce_degree(J,chain_strength = -2):
-    from copy import deepcopy
-    import numpy as np
+def dap(d,term,val):
 
     """
-    (shift, J) = reduce_degree(J)
+    Dict Add aPpend
+    updates the dict d in place: if term exists, adds val to its previous value,
+    else creates the new term in dict d
+
+    Args:
+        d: (dict) the dictionary that will be modified
+        term: the term that will be updated/added to dict
+        val: value corresponding to the term
+
+    """
+
+    if term in d:
+        d[term]+=val
+    else:
+        d[term]=val
+
+def reduce_degree(shift, h, J, scale = 0.5):
+
+
+    """
+    (shift,h, J) = reduce_degree(shift,h,J)
 
     Reduce the degree of a set of objectives specified by terms to have maximum two
     degrees via the introduction of ancillary variables.
 
     Args:
+        shift: constant energy shift
+        h: (dict) linear biases on terms
         J: (dict) quadratic and higher order terms. e.g.: {(1,2):0.5, (1,2,3,4):0.2, ():0.8}
         chain_strength: the reducer will chain up the terms that are supposed to yield the ancilla
 
     Returns:
-        shift: the constant energy shift, that is introduced due to chaining
-        J: (dict) new quadratic terms
-
-    Raises:
-        ValueError
+        shift_return: new energy shift
+        h_return: (dict) new linear terms
+        J_return: (dict) new quadratic terms
+    
     """
+
     terms,values = zip(*J.items())
     values = np.real(values)
-    if not all(np.imag(J.values())==0): raise ValueError('cannot handle complex J values')
     terms = map(list,terms)
     pair_belongs_to = dict()
     max_var = 0
@@ -648,11 +668,26 @@ def reduce_degree(J,chain_strength = -2):
                         if (tmp_1, tmp_2) not in pair_belongs_to:
                             pair_belongs_to[(tmp_1, tmp_2)] = set()
                         pair_belongs_to[(tmp_1, tmp_2)].add(k)
+
     terms = map(tuple,terms)
-    J = dict(zip(terms,values))
-    if () not in J: J[()] = 0.0
+    J_return = dict(zip(terms, values))
+    if () not in J_return: J_return[()] = 0.0
+    h_return = deepcopy(h)
+
+    # add AND gates and an auxiliary per mapping
     for q,i,j in mapping:
-        J[(i,j)] = chain_strength
-        J[()] -= chain_strength
-    const = J.pop(())
-    return const,J
+        max_var+=1
+        dap(J_return, (i, j), 1.0 * scale)
+        dap(J_return, (i, q), -2.0 * scale)
+        dap(J_return, (j, q), -2.0 * scale)
+        dap(J_return, (j, max_var), 1.0 * scale)
+        dap(J_return, (i, max_var), 1.0 * scale)
+        dap(J_return, (q, max_var), -2.0 * scale)
+        dap(h_return,i,-1.0*scale)
+        dap(h_return,j,-1.0*scale)
+        dap(h_return,q,2.0*scale)
+        dap(h_return,max_var,-1.0*scale)
+        J_return[()]+= 4.0 * scale
+    const = J_return.pop(())
+    shift_return=shift + const
+    return shift_return, h_return, J_return
