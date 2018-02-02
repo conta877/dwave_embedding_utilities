@@ -76,7 +76,7 @@ from __future__ import division, absolute_import
 
 import itertools
 import random
-from collections import Counter
+from collections import Counter, defaultdict
 import sys
 from copy import deepcopy
 import numpy as np
@@ -618,23 +618,18 @@ def reduce_degree(shift, h, J, scale = 0.5):
     
     """
 
-    terms,values = zip(*J.items())
+    terms, values = zip(*J.items())
     values = np.real(values)
-    terms = map(list,terms)
-    pair_belongs_to = dict()
+    terms = map(list, terms)
+
+    pair_belongs_to = defaultdict(set)
     max_var = 0
-    for i in range(len(terms)):
-        for ii in range(len(terms[i])):
-            if terms[i][ii] > max_var:
-                max_var = terms[i][ii]
-        if len(terms[i]) > 2:
-            for j in range(len(terms[i])):
-                for k in range(j + 1, len(terms[i])):
-                    tmp_1 = min(terms[i][j], terms[i][k])
-                    tmp_2 = max(terms[i][j], terms[i][k])
-                    if (tmp_1, tmp_2) not in pair_belongs_to:
-                        pair_belongs_to[(tmp_1, tmp_2)] = set()
-                    pair_belongs_to[(tmp_1, tmp_2)].add(i)
+    for i, termi in enumerate(terms):
+        max_var = max(max_var, *termi)
+        if len(termi) > 2:
+            for v1, v2 in itertools.combinations(termi, r=2):
+                v1, v2 = (v1, v2) if v1 <= v2 else (v2, v1)
+                pair_belongs_to[(v1, v2)].add(i)
 
     mapping = []
     while len(pair_belongs_to) != 0:
