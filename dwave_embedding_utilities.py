@@ -620,8 +620,8 @@ def reduce_degree(shift, h, J, scale = 0.5):
 
     terms, values = zip(*J.items())
     values = np.real(values)
-    terms = map(list, terms)
 
+    # Map variable pairs to the terms they belong to.
     pair_belongs_to = defaultdict(set)
     max_var = 0
     for i, termi in enumerate(terms):
@@ -629,60 +629,63 @@ def reduce_degree(shift, h, J, scale = 0.5):
         if len(termi) > 2:
             for v1, v2 in itertools.combinations(termi, r=2):
                 v1, v2 = (v1, v2) if v1 <= v2 else (v2, v1)
-                pair_belongs_to[(v1, v2)].add(i)
+                pair_belongs_to[v1, v2].add(i)
 
+    # Replace pairs of variables by a new single "product" variable.
+    terms = map(list, terms)
     mapping = []
     while len(pair_belongs_to) != 0:
-        max_v_len = 0
-        max_k = ()
-        for k, v in pair_belongs_to.iteritems():
-            if len(v) > max_v_len:
-                max_v_len = len(v)
-                max_k = k
 
+        # Find the pair of variables v1, v2 in the largest number of terms.
+        v1v2_max, term_idx_max = max(pair_belongs_to.iteritems(), key=lambda _, t: len(t))
+        v1_max, v2_max = v1v2_max
+
+        # Replace that pair with a new product variable.
         max_var += 1
-        mapping.append([max_var, max_k[0], max_k[1]])
-        affected = deepcopy(pair_belongs_to[max_k])
-        for k in affected:
-            for j in range(len(terms[k])):
-                for t in range(j + 1, len(terms[k])):
-                    tmp_1 = min(terms[k][j], terms[k][t])
-                    tmp_2 = max(terms[k][j], terms[k][t])
-                    pair_belongs_to[(tmp_1, tmp_2)].remove(k)
-                    if len(pair_belongs_to[(tmp_1, tmp_2)]) == 0:
-                        del pair_belongs_to[(tmp_1, tmp_2)]
-            terms[k].remove(max_k[0])
-            terms[k].remove(max_k[1])
-            terms[k].append(max_var)
+        mapping.append((max_var, v1_max, v2_max))
+        for i in deepcopy(term_idx_max):
+            termi = terms[i]
 
-            if len(terms[k]) > 2:
-                for j in range(len(terms[k])):
-                    for t in range(j + 1, len(terms[k])):
-                        tmp_1 = min(terms[k][j], terms[k][t])
-                        tmp_2 = max(terms[k][j], terms[k][t])
-                        if (tmp_1, tmp_2) not in pair_belongs_to:
-                            pair_belongs_to[(tmp_1, tmp_2)] = set()
-                        pair_belongs_to[(tmp_1, tmp_2)].add(k)
+            # Remove i-th term from consideration.
+            for v1, v2 in itertools.combinations(termi, r=2):
+                v1, v2 = (v1, v2) if v1 <= v2 else (v2, v1)
+                pair_belongs_to[v1, v2].remove(i)
+                if not pair_belongs_to[v1, v2]:
+                    del pair_belongs_to[v1, v2]
 
-    terms = map(tuple,terms)
-    J_return = dict(zip(terms, values))
-    if () not in J_return: J_return[()] = 0.0
-    h_return = deepcopy(h)
+            # Replace two variables by a product one (altering current term).
+            termi.remove(v1_max)
+            termi.remove(v2_max)
+            termi.append(max_var)
 
-    # add AND gates and an auxiliary per mapping
-    for q,i,j in mapping:
-        max_var+=1
-        dap(J_return, (i, j), 1.0 * scale)
-        dap(J_return, (i, q), -2.0 * scale)
-        dap(J_return, (j, q), -2.0 * scale)
-        dap(J_return, (j, max_var), 1.0 * scale)
-        dap(J_return, (i, max_var), 1.0 * scale)
-        dap(J_return, (q, max_var), -2.0 * scale)
-        dap(h_return,i,-1.0*scale)
-        dap(h_return,j,-1.0*scale)
-        dap(h_return,q,2.0*scale)
-        dap(h_return,max_var,-1.0*scale)
-        J_return[()]+= 4.0 * scale
-    const = J_return.pop(())
-    shift_return=shift + const
+            # If term is still too long, add it back.
+            if len(termi) > 2:
+                for v1, v2 in itertools.combinations(termi, r=2):
+                    v1, v2 = (v1, v2) if v1 <= v2 else (v2, v1)
+                    pair_belongs_to[v1, v2].add(i)
+
+    # Modified terms and old values.
+    J_return = defaultdict(float, zip(map(tuple, terms), values))
+    h_return = defaultdict(float, h)
+
+    # New product term values (and resulting constant offset).
+    const = 0.0
+    for q, i, j in mapping:
+        max_var += 1
+
+        J_return[i, j] += 1. * scale
+        J_return[i, q] += -2. * scale
+        J_return[i, max_var] += 1. * scale
+        J_return[j, q] += -2. * scale
+        J_return[j, max_var] += 1. * scale
+        J_return[q, max_var] += -2. * scale
+
+        h_return[i] += -1. * scale
+        h_return[j] += -1. * scale
+        h_return[q] += 2. * scale
+        h_return[max_var] += -1. * scale
+
+        const += 4. * scale
+
+    shift_return = shift + const
     return shift_return, h_return, J_return
